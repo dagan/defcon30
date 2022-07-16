@@ -1,0 +1,3 @@
+defaultNamespace: da-vinci
+helm:
+  chart: git::git@gitea-ssh.gitops:gitops/vitruvian.git?ref=v2;

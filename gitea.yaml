@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: gitea-http
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - istio-system/ingressgateway
+  http:
+  - match:
+    - uri:
+        exact: /gitea
+    redirect:
+      uri: /gitea/
+  - match:
+    - uri:
+        prefix: /gitea/
+    rewrite:
+      uri: /
+    route:
+    - destination:
+        host: gitea-http

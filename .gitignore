@@ -1,3 +1,4 @@
 /.idea
 
-istio-1.4.6
+/istio-1.4.6
+/.gitcredentials
