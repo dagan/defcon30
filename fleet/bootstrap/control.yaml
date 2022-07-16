@@ -1,0 +1,10 @@
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: control
+  namespace: fleet-default
+spec:
+  branch: main
+  clientSecretName: gitops-ssh-key
+  helmSecretName: gitops-ssh-key
+  repo: git@gitea-ssh.gitops:gitops/fleet-control.git
