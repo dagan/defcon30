@@ -4,7 +4,7 @@
 GITOPS_PUBLIC_KEY=ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBN6HY7lDW2kSd0V6J/I8PZEG9bYGkl0oXYqowJIjyPxDvnezbfc2fgQiZscb03ySihdMaxtSWJcer93suyYKShM=
 
 .PHONY: build
-build: depends image cluster istio gitea
+build: depends image cluster longhorn istio gitea
 
 .PHONY: reset
 reset: clean-kind clean-git-repos build
@@ -31,6 +31,10 @@ image:
 .PHONY: cluster
 cluster:
 	kind create cluster --image=defcon30/kind:pwnership --name pwnership --config kind.yaml
+
+.PHONY: longhorn
+longhorn:
+	helm -n longhorn-system install --create-namespace longhorn https://github.com/longhorn/charts/releases/download/longhorn-1.2.2/longhorn-1.2.2.tgz
 
 ISTIOCTL := "$(shell pwd)/istio-1.4.6/bin/istioctl"
 .PHONY: istio
