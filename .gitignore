@@ -2,3 +2,5 @@
 
 /istio-1.4.6
 /.gitcredentials
+/fleet-key
+/fleet-key.pub

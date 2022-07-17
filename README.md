@@ -68,6 +68,14 @@
     EOF
     ```
 
+### Install Longhorn
+
+ 1. Install the Helm chart
+    ```shell
+    helm -n longhorn-system install --create-namespace longhorn https://github.com/longhorn/charts/releases/download/longhorn-1.2.2/longhorn-1.2.2.tgz \
+      --set persistence.defaultClass=false
+    ```
+
 #### Install Gitea
 
 1. Create the gitops namespace and admin credentials.
