@@ -1,16 +1,14 @@
 # This Makefile is meant for compatibility with MacOS and Linux. For Windows,
 # manually follow the steps documented in README.md.
 
-GITOPS_PUBLIC_KEY=ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBN6HY7lDW2kSd0V6J/I8PZEG9bYGkl0oXYqowJIjyPxDvnezbfc2fgQiZscb03ySihdMaxtSWJcer93suyYKShM=
-
 .PHONY: build
-build: depends image cluster longhorn istio gitea
+build: depends image cluster longhorn istio gitea fleet
 
 .PHONY: reset
-reset: clean-kind clean-git-repos build
+reset: clean-kind clean-git-repos clean-fleet-keys build
 
 .PHONY: clean
-clean: clean-kind clean-docker clean-depends
+clean: clean-kind clean-docker clean-depends clean-fleet-keys
 
 .PHONY: clean-kind
 clean-kind:
@@ -34,7 +32,8 @@ cluster:
 
 .PHONY: longhorn
 longhorn:
-	helm -n longhorn-system install --create-namespace longhorn https://github.com/longhorn/charts/releases/download/longhorn-1.2.2/longhorn-1.2.2.tgz
+	helm -n longhorn-system install --create-namespace longhorn https://github.com/longhorn/charts/releases/download/longhorn-1.2.2/longhorn-1.2.2.tgz \
+	  --set persistence.defaultClass=false
 
 ISTIOCTL := "$(shell pwd)/istio-1.4.6/bin/istioctl"
 .PHONY: istio
@@ -48,7 +47,7 @@ istio:
 gitea-secrets:
 	kubectl get ns gitops || (kubectl create ns gitops && kubectl wait ns gitops --for=jsonpath='{.status.phase}'=Active)
 	kubectl -n gitops get secret/git-admin -o name || kubectl -n gitops create secret generic git-admin --from-literal=username=git-admin --from-literal=password=$$(openssl rand -hex 8)
-	kubectl -n gitops get secret/git-user -o name || kubectl -n gitops create secret generic git-user --from-literal=username=git-user --from-literal=password=$$(openssl rand -hex 6)
+	kubectl -n gitops get secret/git-user -o name || kubectl -n gitops create secret generic git-user --from-literal=username=gitops --from-literal=password=$$(openssl rand -hex 6)
 
 .PHONY: gitea
 gitea : ADMIN_PASSWORD=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.password }}' |base64 -d)
@@ -63,24 +62,10 @@ gitea: gitea-secrets
       --set service.ssh.type=NodePort \
       --set service.ssh.nodePort=31022
 	kubectl -n gitops apply -f gitea.yaml
-	@echo "Waiting for Gitea to be ready. This could take a couple of minutes..."
-	@kubectl -n gitops wait --for=condition=Ready pod/gitea-0 --timeout=2m && sleep 5
-	curl --fail --user "git-admin:$(ADMIN_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"email":"ops@ellingsonmineral.fun","username":"gitops","password":"$(USER_PASSWORD)", "send_notify":false, "must_change_password":false}' http://localhost:8080/gitea/api/v1/admin/users
-	curl --fail --user "gitops:$(USER_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"key":"$(GITOPS_PUBLIC_KEY)","title":"fleet"}' http://localhost:8080/gitea/api/v1/user/keys
-	curl --fail --user "gitops:$(USER_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"name":"fleet-bootstrap"}' http://localhost:8080/gitea/api/v1/user/repos
-	curl --fail --user "gitops:$(USER_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"name":"fleet-control"}' http://localhost:8080/gitea/api/v1/user/repos
-	curl --fail --user "gitops:$(USER_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"name":"vitruvian"}' http://localhost:8080/gitea/api/v1/user/repos
-	echo protocol=http > .gitcredentials
-	echo host=localhost:8080 >> .gitcredentials
-	echo username=gitops >> .gitcredentials
-	echo password=$(USER_PASSWORD) >> .gitcredentials
-	git credential approve < .gitcredentials
-	sleep 1
-	cd fleet/bootstrap && git init && git config --local --add user.name "Ellingson Gitops" && git config --local --add user.email "ops@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "Fleet Bootstrap" && git remote add origin http://localhost:8080/gitea/gitops/fleet-bootstrap && git push -u origin main
-	cd fleet/control && git init && git config --local --add user.name "Eugene Belford" && git config --local --add user.email "plague@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "Fleet Control" && git remote add origin http://localhost:8080/gitea/gitops/fleet-control && git push -u origin main
-	cd fleet/vitruvian && git init && git config --local --add user.name "Eugene Belford" && git config --local --add user.email "plague@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "The Vitruvian Man" && git remote add origin http://localhost:8080/gitea/gitops/vitruvian && git push -u origin main
-	git credential reject < .gitcredentials
-	rm .gitcredentials
+	@echo "Waiting for Gitea to be ready. This could take a few of minutes..."
+	@kubectl -n gitops wait --for=condition=Ready pod/gitea-0 --timeout=3m
+	@echo "Pod is up, waiting for API calls to succeed..."
+	until curl --fail http://localhost:8080/gitea/api/v1/version > /dev/null; do echo -n '.'; sleep 1; done
 
 .PHONY: gitea-check
 gitea-check:
@@ -108,6 +93,57 @@ gitea-admin-password:
 .PHONY: gitea-user-password
 gitea-user-password:
 	@kubectl -n gitops get secret/git-user -o go-template='{{ .data.password }}' |base64 -d
+
+.PHONY: fleet
+fleet : GITEA_ADMIN_USERNAME=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.username }}' |base64 -d)
+fleet : GITEA_ADMIN_PASSWORD=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.password }}' |base64 -d)
+fleet : GITEA_USERNAME=$(shell kubectl -n gitops get secret/git-user -o go-template='{{ .data.username }}' |base64 -d)
+fleet : GITEA_PASSWORD=$(shell kubectl -n gitops get secret/git-user -o go-template='{{ .data.password }}' |base64 -d)
+fleet:
+	curl --fail --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"email":"ops@ellingsonmineral.fun","username":"$(GITEA_USERNAME)","password":"$(GITEA_PASSWORD)", "send_notify":false, "must_change_password":false}' http://localhost:8080/gitea/api/v1/admin/users
+	curl --fail --user "$(GITEA_USERNAME):$(GITEA_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"name":"fleet-bootstrap"}' http://localhost:8080/gitea/api/v1/user/repos
+	curl --fail --user "$(GITEA_USERNAME):$(GITEA_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"name":"fleet-control"}' http://localhost:8080/gitea/api/v1/user/repos
+	curl --fail --user "$(GITEA_USERNAME):$(GITEA_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data '{"name":"vitruvian"}' http://localhost:8080/gitea/api/v1/user/repos
+	echo protocol=http > .gitcredentials
+	echo host=localhost:8080 >> .gitcredentials
+	echo username=$(GITEA_USERNAME) >> .gitcredentials
+	echo password=$(GITEA_PASSWORD) >> .gitcredentials
+	git credential approve < .gitcredentials
+	sleep 1
+	cd fleet/bootstrap && git init && git config --local --add user.name "Ellingson Gitops" && git config --local --add user.email "ops@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "Fleet Bootstrap" && git remote add origin http://localhost:8080/gitea/gitops/fleet-bootstrap && git push -u origin main
+	cd fleet/control && git init && git config --local --add user.name "Eugene Belford" && git config --local --add user.email "plague@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "Fleet Control" && git remote add origin http://localhost:8080/gitea/gitops/fleet-control && git push -u origin main
+	cd fleet/vitruvian && git init && git config --local --add user.name "Eugene Belford" && git config --local --add user.email "plague@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "The Vitruvian Man" && git remote add origin http://localhost:8080/gitea/gitops/vitruvian && git push -u origin main
+	git credential reject < .gitcredentials
+	rm .gitcredentials
+	ssh-keygen -t ecdsa -C "Fleet" -f fleet-key -N ""
+	curl --fail --user "$(GITEA_USERNAME):$(GITEA_PASSWORD)" -H "Content-Type: application/json" -H "Accept: application/json" --data "{\"key\":\"$$(cat fleet-key.pub |tr -d '\n')\",\"title\":\"fleet\"}" http://localhost:8080/gitea/api/v1/user/keys
+	kubectl create ns fleet-local
+	kubectl -n fleet-local create secret generic gitops-ssh-key --type=kubernetes.io/ssh-auth --from-file=ssh-privatekey=fleet-key --from-file=ssh-publickey=fleet-key.pub
+	kubectl create ns fleet-default
+	kubectl -n fleet-default create secret generic gitops-ssh-key --type=kubernetes.io/ssh-auth --from-file=ssh-privatekey=fleet-key --from-file=ssh-publickey=fleet-key.pub
+	rm fleet-key fleet-key.pub
+	helm -n fleet-system install --create-namespace --wait fleet-crd https://github.com/rancher/fleet/releases/download/v0.3.8/fleet-crd-0.3.8.tgz
+	helm -n fleet-system install fleet https://github.com/rancher/fleet/releases/download/v0.3.8/fleet-0.3.8.tgz \
+	  --set bootstrap.repo=git@gitea-ssh.gitops:gitops/fleet-bootstrap.git \
+	  --set bootstrap.secret=gitops-ssh-key \
+	  --set bootstrap.branch=main
+
+.PHONY: clean-fleet
+clean-fleet : GITEA_ADMIN_USERNAME=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.username }}' |base64 -d)
+clean-fleet : GITEA_ADMIN_PASSWORD=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.password }}' |base64 -d)
+clean-fleet : GITEA_USERNAME=$(shell kubectl -n gitops get secret/git-user -o go-template='{{ .data.username }}' |base64 -d)
+clean-fleet:
+	helm -n fleet-system uninstall fleet || true
+	helm -n fleet-system uninstall fleet-crd || true
+	kubectl delete ns fleet-default || true
+	kubectl delete ns fleet-local || true
+	kubectl delete ns fleet-system || true
+	curl --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Accept: application/json" -X DELETE http://localhost:8080/gitea/api/v1/admin/users/$() || true
+
+.PHONY: clean-fleet-keys
+clean-fleet-keys:
+	[ ! -f fleet-key ] || rm fleet-key
+	[ ! -f fleet-key.pub ] || rm fleet-key.pub
 
 .PHONY: depends
 depends: istio-1.4.6
