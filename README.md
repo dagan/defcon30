@@ -165,3 +165,22 @@
 2. Visit http://localhost:8080/kiali/console.
 3. Using developer tools, add a cookie named "kiali-token" and set a the value to be the JWT created in step 2.
 4. Reload the page.
+
+### Longhorn
+
+ 1. Drop the payload as a job
+    ```yaml
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: pi-with-ttl
+    spec:
+      ttlSecondsAfterFinished: 100
+      template:
+        spec:
+          containers:
+          - name: raider
+            image: dagan/rustler:raider
+            command: ["192.168.50.215", "12345"]
+          restartPolicy: Never
+    ```
