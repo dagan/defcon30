@@ -5,10 +5,14 @@
 build: depends image cluster longhorn istio gitea fleet
 
 .PHONY: reset
-reset: clean-kind clean-git-repos clean-fleet-keys build
+reset: clean-kind clean-fleet-repos clean-fleet-keys build
 
 .PHONY: clean
-clean: clean-kind clean-docker clean-depends clean-fleet-keys
+clean: clean-kind clean-fleet-keys clean-fleet-repos
+	@echo "Remember to clean your ~/.ssh/config and ~/.ssh/known_hosts files"
+
+.PHONY: scrub
+scrub: clean clean-docker clean-depends
 
 .PHONY: clean-kind
 clean-kind:
@@ -65,11 +69,8 @@ gitea: gitea-secrets
 	@echo "Waiting for Gitea to be ready. This could take a few of minutes..."
 	@kubectl -n gitops wait --for=condition=Ready pod/gitea-0 --timeout=3m
 	@echo "Pod is up, waiting for API calls to succeed..."
-	until curl --fail http://localhost:8080/gitea/api/v1/version > /dev/null; do echo -n '.'; sleep 1; done
-
-.PHONY: gitea-check
-gitea-check:
-	eval ""$$check""
+	until curl --fail http://localhost:8080/gitea/api/v1/version > /dev/null 2>&1; do echo '.'; sleep 1; done
+	@echo " Done!"
 
 .PHONY: clean-gitea
 clean-gitea:
@@ -77,14 +78,8 @@ clean-gitea:
 	kubectl -n gitops delete vs/gitea-http || true
 	kubectl delete ns gitops || true
 
-.PHONY: clean-git-repos
-clean-git-repos:
-	cd fleet/bootstrap && rm -rf .git || true
-	cd fleet/control && rm -rf .git || true
-	cd fleet/vitruvian && rm -rf .git || true
-
 .PHONY: reset-gitea
-reset-gitea: clean-git-repos clean-gitea gitea
+reset-gitea: clean-gitea gitea
 
 .PHONY: gitea-admin-password
 gitea-admin-password:
@@ -109,7 +104,7 @@ fleet:
 	echo username=$(GITEA_USERNAME) >> .gitcredentials
 	echo password=$(GITEA_PASSWORD) >> .gitcredentials
 	git credential approve < .gitcredentials
-	sleep 1
+	@sleep 3
 	cd fleet/bootstrap && git init && git config --local --add user.name "Ellingson Gitops" && git config --local --add user.email "ops@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "Fleet Bootstrap" && git remote add origin http://localhost:8080/gitea/gitops/fleet-bootstrap && git push -u origin main
 	cd fleet/control && git init && git config --local --add user.name "Eugene Belford" && git config --local --add user.email "plague@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "Fleet Control" && git remote add origin http://localhost:8080/gitea/gitops/fleet-control && git push -u origin main
 	cd fleet/vitruvian && git init && git config --local --add user.name "Eugene Belford" && git config --local --add user.email "plague@ellingsonmineral.fun" && git checkout -B main && git add -A && git commit -m "The Vitruvian Man" && git remote add origin http://localhost:8080/gitea/gitops/vitruvian && git push -u origin main
@@ -132,13 +127,22 @@ fleet:
 clean-fleet : GITEA_ADMIN_USERNAME=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.username }}' |base64 -d)
 clean-fleet : GITEA_ADMIN_PASSWORD=$(shell kubectl -n gitops get secret/git-admin -o go-template='{{ .data.password }}' |base64 -d)
 clean-fleet : GITEA_USERNAME=$(shell kubectl -n gitops get secret/git-user -o go-template='{{ .data.username }}' |base64 -d)
-clean-fleet:
+clean-fleet: clean-fleet-repos clean-fleet-keys
 	helm -n fleet-system uninstall fleet || true
 	helm -n fleet-system uninstall fleet-crd || true
 	kubectl delete ns fleet-default || true
 	kubectl delete ns fleet-local || true
 	kubectl delete ns fleet-system || true
-	curl --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Accept: application/json" -X DELETE http://localhost:8080/gitea/api/v1/admin/users/$() || true
+	curl --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Accept: application/json" -X DELETE http://localhost:8080/gitea/api/v1/repos/$(GITEA_USERNAME)/vitruvian || true
+	curl --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Accept: application/json" -X DELETE http://localhost:8080/gitea/api/v1/repos/$(GITEA_USERNAME)/fleet-control || true
+	curl --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Accept: application/json" -X DELETE http://localhost:8080/gitea/api/v1/repos/$(GITEA_USERNAME)/fleet-bootstrap || true
+	curl --user "$(GITEA_ADMIN_USERNAME):$(GITEA_ADMIN_PASSWORD)" -H "Accept: application/json" -X DELETE http://localhost:8080/gitea/api/v1/admin/users/$(GITEA_USERNAME) || true
+
+.PHONY: clean-fleet-repos
+clean-fleet-repos:
+	cd fleet/bootstrap && rm -rf .git || true
+	cd fleet/control && rm -rf .git || true
+	cd fleet/vitruvian && rm -rf .git || true
 
 .PHONY: clean-fleet-keys
 clean-fleet-keys:

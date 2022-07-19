@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opsamatic
+  namespace: fleet-local
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 30
+      template:
+        spec:
+          containers:
+            - name: git
+              image: rancher/fleet-agent:v0.3.8
+              env:
+                - name: GIT_SSH_COMMAND
+                  value: "/usr/bin/ssh -i /workspace/keys/ssh-privatekey -o StrictHostKeyChecking=no"
+              workingDir: /workspace/
+              command:
+                - /bin/bash
+                - "-c"
+              args:
+                - 'git clone git@gitea-ssh.gitops:gitops/fleet-control.git && cd fleet-control && git config --local --add user.name Opsamatic && git config --local user.email ops@ellingsonmineral.fun && git commit -m "Working..." --allow-empty && git push'
+              volumeMounts:
+                - mountPath: /workspace/keys
+                  name: ssh-key
+          restartPolicy: Never
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: gitops-ssh-key
+                defaultMode: 0600

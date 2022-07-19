@@ -2,7 +2,7 @@ apiVersion: fleet.cattle.io/v1alpha1
 kind: GitRepo
 metadata:
   name: control
-  namespace: fleet-default
+  namespace: fleet-local
 spec:
   branch: main
   clientSecretName: gitops-ssh-key
