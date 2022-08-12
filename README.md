@@ -32,11 +32,11 @@ The Makefile will:
 
 1. Use https://jwt.io to create a new JWT signed with the secret "kiali".
     - the signing key must be "kiali"
-    - "exp" claim with a future timestamp is required (e.g., 1660550400)
+    - "exp" claim with a future timestamp is required (e.g., 1975944776)
     - "iss" claim must be set to "kiali-login"
     - "sub" claim must be a non-empty string
    ```
-   eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc1NzA0MzQsImlzcyI6ImtpYWxpLWxvZ2luIiwic3ViIjoiRXZpbCBEYWdhbiJ9.XYvyZLlKOrI_vj5w6xjvw_PdFp3oyu_mzF5omwSTzxg
+   eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE5NzU5NDQ3NzYsImlzcyI6ImtpYWxpLWxvZ2luIiwic3ViIjoiMTMzNyBoYXhvciJ9.Ub63IF6JujWvPc9AEzj4QbE1hjRujEB3Q4kOxabDzUo
    ```
 2. Visit http://localhost:8080/kiali/console.
 3. Using your browser's developer tools/console, add a cookie named "kiali-token" and set the value to be the JWT created in step 2.
