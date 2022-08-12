@@ -2,7 +2,7 @@
 # manually follow the steps documented in README.md.
 
 .PHONY: build
-build: depends image cluster longhorn istio gitea fleet
+build: depends image cluster longhorn istio gitea fleet load-raider
 
 .PHONY: reset
 reset: clean-kind clean-fleet-repos clean-fleet-keys build
@@ -148,6 +148,10 @@ clean-fleet-repos:
 clean-fleet-keys:
 	[ ! -f fleet-key ] || rm fleet-key
 	[ ! -f fleet-key.pub ] || rm fleet-key.pub
+
+.PHONY: load-raider
+load-raider:
+	kind --name=pwnership load docker-image dagan/rustler:raider
 
 .PHONY: depends
 depends: istio-1.4.6
