@@ -14,7 +14,9 @@ My sincere hope is that this walkthrough makes it incredibly easy for anyone int
 
 Also, you'll need to clone the Longhorn exploit package and build the Docker image. As long as the Docker image is locally available, the Makefile will take care of loading it into the demo cluster.
 1. Clone git@github.com:dagan/rustler.git
-2. Run ```make raider```
+2. cd rustler
+3. git checkout v0.1.0
+4. Run ```make raider```
 
 ### Make
 
